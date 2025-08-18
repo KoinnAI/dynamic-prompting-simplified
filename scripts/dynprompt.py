@@ -78,6 +78,7 @@ class DynPromptScript(scripts.Script):
         pos_text_raw = p.prompt or ""
         neg_text_raw = p.negative_prompt or ""
 
+        # Raw tokens user typed (still useful)
         pos_tokens_raw = set(WILDCARD_TOKEN_RE.findall(pos_text_raw))
         neg_tokens_raw = set(WILDCARD_TOKEN_RE.findall(neg_text_raw))
 
@@ -89,18 +90,26 @@ class DynPromptScript(scripts.Script):
             pos_expanded = expander_pos.expand_prompt(pos_text_raw, phase="pos")
             neg_expanded = expander_neg.expand_prompt(neg_text_raw, phase="neg")
 
-            # Optional convenience: auto-mirror -mir tokens from positive to negative
             if auto_mirror:
-                pos_mir_tokens = [t for t in pos_tokens_raw if t.endswith("-mir")]
-                inject_tokens = [t for t in pos_mir_tokens if t not in neg_tokens_raw]
-                if inject_tokens:
-                    auto_neg_src = ", ".join(f"__{t}__" for t in inject_tokens)
+                # NEW: include any -mir tokens that appeared *inside* expanded positive wildcards
+                # (e.g., __outfits__ -> ... __foo-mir__ ...)
+                seen_mir_pos = set(expander_pos.seen_mir_tokens)
+
+                # Also keep supporting explicit top-level tokens typed by the user in the POS box
+                pos_mir_tokens_raw = {t for t in pos_tokens_raw if t.endswith("-mir")}
+
+                # Candidates to inject = (seen in POS) ∪ (typed in POS) but NOT typed in NEG
+                candidates = (seen_mir_pos | pos_mir_tokens_raw) - neg_tokens_raw
+
+                if candidates:
+                    auto_neg_src = ", ".join(f"__{t}__" for t in sorted(candidates))
                     auto_neg_expanded = expander_neg.expand_prompt(auto_neg_src, phase="neg").strip().strip(", ")
                     if auto_neg_expanded:
                         neg_expanded = (neg_expanded + ", " if neg_expanded else "") + auto_neg_expanded
 
             all_prompts.append(pos_expanded)
             all_negative.append(neg_expanded)
+
 
         # Hand expanded prompts to the pipeline and for PNG metadata
         p.all_prompts = all_prompts
