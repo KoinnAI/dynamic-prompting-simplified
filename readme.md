@@ -7,9 +7,12 @@ This extension adds **dynamic prompting** to SD WebUI Forge, supporting advanced
 - **Nested choices** with `{option1|option2|{nested1|nested2}}`
 - **Wildcard expansion** with `__name__` → expands from `wildcards/name.txt`
 - **Line-separated wildcard files** that may themselves contain braces and wildcards
-- **Mirrored wildcards** with `__name-mir__` → complementary choices between positive and negative prompts
+- **Mirrored wildcards** with `__name-mir__`:
+  - Positive prompt gets the **chosen option**
+  - Negative prompt gets **all the other options, comma-separated**
 - **Deterministic behavior** using the current generation seed
 - Works for both **positive** and **negative** prompts
+- Expanded prompts are saved into PNG metadata
 
 ## 📂 Installation
 
@@ -47,14 +50,16 @@ top hat
 
 **Example: `wildcards/hats-mir.txt`**
 ```
-{red hat|blue hat}
+{red hat|blue hat|green hat}
 {tall hat|short hat|medium hat}
 ```
 
 - Positive prompt: `portrait, __hats-mir__`
 - Negative prompt: `lowres, __hats-mir__`
-  - If pos → `red hat`, neg → `blue hat`
-  - If pos → `tall hat`, neg → `medium hat`
+  - If pos → `red hat`, neg → `blue hat, green hat`
+  - If pos → `short hat`, neg → `tall hat, medium hat`
+
+This ensures that the **negative prompt excludes the token chosen in the positive prompt.**
 
 ## ⚙️ Usage
 
@@ -81,3 +86,4 @@ Negative: lowres, bad anatomy, __hats-mir__
 
 ---
 
+Made with ❤️ for prompt tinkerers.
