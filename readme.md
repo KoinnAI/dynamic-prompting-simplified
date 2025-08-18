@@ -84,6 +84,13 @@ Negative: lowres, bad anatomy, __hats-mir__
 - Braces expand until fully resolved.
 - Safety caps prevent runaway expansion.
 
----
+## Licence & Contributing
+Contributing:
 
-Made with ❤️ for prompt tinkerers.
+  - 1 fork this repository
+  - 2 make changes
+  - 3 submit pull request
+
+- License: GNU General Public License (GPLv3) (https://www.gnu.org/licenses/gpl-3.0.en.html)
+
+- Made for [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge)
