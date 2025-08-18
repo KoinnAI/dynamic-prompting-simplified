@@ -1,17 +1,14 @@
 import os
-from modules import scripts, script_callbacks, shared
-from modules.shared import opts
 import gradio as gr
-
-from dynprompt.expander import PromptExpander
+from modules import scripts
+from modules.processing import fix_seed
+from dynprompt.expander import PromptExpander, WILDCARD_TOKEN_RE
 
 EXT_NAME = "sd-webui-dynprompt"
 DEFAULT_WILDCARD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wildcards")
 
-def get_seed_from_p(p):
-    # Try to derive a stable seed for deterministic mirrored choices
+def get_seed(p):
     try:
-        # txt2img: p.seed is an int or -1; if -1 use p.all_seeds[0] later
         seed = p.seed
         if seed is None or seed == -1:
             if getattr(p, "all_seeds", None):
@@ -27,7 +24,6 @@ class DynPromptScript(scripts.Script):
         return "Dynamic Prompt (Forge)"
 
     def show(self, is_img2img):
-        # Show on both tabs
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
@@ -36,44 +32,77 @@ class DynPromptScript(scripts.Script):
             wildcard_dir = gr.Textbox(
                 value=DEFAULT_WILDCARD_DIR,
                 label="Wildcard directory",
-                info="Folder containing *.txt wildcard lists (e.g., hats.txt → __hats__)."
+                info="Folder with *.txt wildcard lists (e.g., hats.txt → __hats__)."
             )
-            note = gr.Markdown(
-                "Supports nested `{a|b|{c|d}}`, wildcard tokens like `__name__`, and mirrored wildcards `__name-mir__`.\n"
-                "**Tip:** Wildcard files may contain braces and other wildcards."
+            auto_mirror = gr.Checkbox(
+                value=True,
+                label="Automatically mirror -mir wildcards without explicitly adding them to the negative prompt"
             )
-        return [enable, wildcard_dir]
+            gr.Markdown(
+                "Supports nested `{a|b|{c|d}}`, wildcards `__name__`, and mirrored wildcards `__name-mir__`.\n"
+                "Mirrored: **positive** gets the chosen option; **negative** gets all remaining options (comma-separated)."
+            )
+        # IMPORTANT: return components in the same order that process() expects
+        return [enable, wildcard_dir, auto_mirror]
 
-    def before_process(self, p, enable, wildcard_dir):
+    def process(self, p, enable, wildcard_dir, auto_mirror):
         if not enable:
             return
 
         if not wildcard_dir or not os.path.isdir(wildcard_dir):
             wildcard_dir = DEFAULT_WILDCARD_DIR
 
-        seed = get_seed_from_p(p)
-
-        # Expand positive and negative separately with the same RNG seed,
-        # but different 'phase' so -mir picks invert correctly.
-        expander_pos = PromptExpander(wildcard_dir, seed=seed)
-        expander_neg = PromptExpander(wildcard_dir, seed=seed)
+        # Ensure seeds are prepared; SD uses these for array prompts/metadata
+        fix_seed(p)
+        base_seed = get_seed(p)
 
         try:
-            p.prompt = expander_pos.expand_prompt(p.prompt or "", phase="pos")
-        except Exception as e:
-            print(f"[{EXT_NAME}] Error expanding positive prompt: {e}")
+            total = max(1, p.batch_size * p.n_iter)
+        except Exception:
+            total = 1
 
-        try:
-            p.negative_prompt = expander_neg.expand_prompt(p.negative_prompt or "", phase="neg")
-        except Exception as e:
-            print(f"[{EXT_NAME}] Error expanding negative prompt: {e}")
+        all_prompts = []
+        all_neg = []
 
-# (Optional) add a setting to make the wildcard dir globally configurable
-def on_ui_settings():
-    section = ("dynamic_prompt", "Dynamic Prompt")
-    shared.opts.add_option(
-        "dynprompt_wildcard_dir",
-        shared.OptionInfo(DEFAULT_WILDCARD_DIR, "Default wildcard directory", section=section)
-    )
+        # Raw user inputs (used to detect which -mir tokens were explicitly placed)
+        pos_text_raw = p.prompt or ""
+        neg_text_raw = p.negative_prompt or ""
 
-script_callbacks.on_ui_settings(on_ui_settings)
+        # Pre-extract raw tokens once (for auto mirror logic)
+        pos_tokens_raw = set(WILDCARD_TOKEN_RE.findall(pos_text_raw))
+        neg_tokens_raw = set(WILDCARD_TOKEN_RE.findall(neg_text_raw))
+
+        for i in range(total):
+            seed_i = base_seed + i
+            expander_pos = PromptExpander(wildcard_dir, seed=seed_i)
+            expander_neg = PromptExpander(wildcard_dir, seed=seed_i)
+
+            # Expand the user-provided texts
+            pos_expanded = expander_pos.expand_prompt(pos_text_raw, phase="pos")
+            neg_expanded = expander_neg.expand_prompt(neg_text_raw, phase="neg")
+
+            # --- Auto-mirror injection (optional) ---
+            if auto_mirror:
+                # Find -mir tokens present in POS raw text but not explicitly present in NEG raw text
+                pos_mir_tokens = [t for t in pos_tokens_raw if t.endswith("-mir")]
+                inject_tokens = [t for t in pos_mir_tokens if t not in neg_tokens_raw]
+
+                if inject_tokens:
+                    # Build a synthetic negative snippet composed of those tokens,
+                    # then expand with phase="neg" so it becomes the "others" list.
+                    auto_neg_src = ", ".join(f"__{t}__" for t in inject_tokens)
+                    auto_neg_expanded = expander_neg.expand_prompt(auto_neg_src, phase="neg").strip().strip(", ")
+
+                    if auto_neg_expanded:
+                        neg_expanded = (neg_expanded + ", " if neg_expanded else "") + auto_neg_expanded
+
+            all_prompts.append(pos_expanded)
+            all_neg.append(neg_expanded)
+
+        # Populate arrays so Forge uses expanded prompts and writes them into PNG metadata
+        p.all_prompts = all_prompts
+        p.all_negative_prompts = all_neg
+
+        # Keep the first for UI preview
+        p.prompt = all_prompts[0]
+        p.negative_prompt = all_neg[0]
