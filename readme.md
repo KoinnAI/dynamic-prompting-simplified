@@ -86,4 +86,3 @@ Negative: lowres, bad anatomy, __hats-mir__
 
 ---
 
-Made with ❤️ for prompt tinkerers.
