@@ -10,6 +10,7 @@ This extension adds **dynamic prompting** to SD WebUI Forge, supporting advanced
 - **Mirrored wildcards** with `__name-mir__`:
   - Positive prompt gets the **chosen option**
   - Negative prompt gets **all the other options, comma-separated**
+  - Strict resolution: `__name-mir__` reads **only** `wildcards/name-mir.txt` (no fallback to `name.txt`)
 - **Deterministic behavior** using the current generation seed
 - Works for both **positive** and **negative** prompts
 - Expanded prompts are saved into PNG metadata
@@ -45,7 +46,7 @@ top hat
 
 ## 🔄 Mirrored Wildcards
 
-- File name: `name-mir.txt` (called via `__name-mir__`)
+- File name: `name-mir.txt` (called via `__name-mir__`).
 - Ensures complementary picks between positive/negative prompts.
 
 **Example: `wildcards/hats-mir.txt`**
@@ -61,6 +62,35 @@ top hat
 
 This ensures that the **negative prompt excludes the token chosen in the positive prompt.**
 
+### 🧩 Nested `-mir` behavior (auto-discovery)
+
+Mirrored tokens can be **nested inside other wildcards**. If a wildcard you use in the **positive** prompt expands to another token like `__foo-mir__`, the extension can **automatically inject the mirrored complement** into the **negative** prompt (so you don’t have to add `__foo-mir__` manually).
+
+- This requires the checkbox in the UI:  
+  **“Automatically mirror -mir wildcards without explicitly adding them to the negative prompt.”** (enabled by default)
+- The auto-inject only happens if the negative prompt does **not** already contain that `__*-mir__` token.
+- Resolution is strict: `__foo-mir__` reads `wildcards/foo-mir.txt` only.
+
+**Example (nested):**
+```
+wildcards/outfits.txt
+---------------------
+__hats-mir__, {casual|formal}
+
+wildcards/hats-mir.txt
+----------------------
+{red hat|blue hat|green hat}
+```
+
+Usage:
+- Positive: `portrait, __outfits__`
+- Negative: *(leave blank or put your usual negatives)*
+
+Behavior:
+- The positive prompt expands `__outfits__` → which contains `__hats-mir__`.
+- With the checkbox enabled, the extension auto-injects `__hats-mir__` into the **negative** and expands it there as the comma‑separated “other” options.
+- If the seed picks **`red hat`** for positive, the negative gets **`blue hat, green hat`** automatically.
+
 ## ⚙️ Usage
 
 - Write prompts as usual with `{}` and `__wildcards__`.
@@ -73,24 +103,26 @@ Positive: portrait, {cinematic|studio|outdoor}, __hats__, soft lighting
 Negative: lowres, bad anatomy, __hats-mir__
 ```
 
-## 🛠️ Settings
-
-- Enable/disable dynamic prompting in the UI under **Dynamic Prompt** accordion.
-- Configure the default `wildcards/` directory in settings.
+### UI Options
+- **Enable dynamic prompt expansion** — master toggle.
+- **Wildcard directory** — where your `.txt` wildcard files live.
+- **Automatically mirror -mir wildcards without explicitly adding them to the negative prompt** —
+  When on, any `__*-mir__` discovered in the **positive** (even nested within another wildcard) is appended to the **negative** prompt and expanded as the “others.”
 
 ## ✅ Notes
 
 - Missing wildcard files resolve to empty string.
 - Braces expand until fully resolved.
 - Safety caps prevent runaway expansion.
+- Deterministic per seed: line selection for wildcards is stable across runs; within a mirrored brace, the chosen index is mirrored so the negative sees the remaining options.
 
 ## Licence & Contributing
-Contributing:
 
-  - 1 fork this repository
-  - 2 make changes
-  - 3 submit pull request
+**Contributing**
+- 1 fork this repository  
+- 2 make changes  
+- 3 submit pull request
 
-- License: GNU General Public License (GPLv3) (https://www.gnu.org/licenses/gpl-3.0.en.html)
+**License:** GNU General Public License (GPLv3) (https://www.gnu.org/licenses/gpl-3.0.en.html)
 
-- Made for [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge)
+Made for [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge)
