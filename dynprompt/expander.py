@@ -66,23 +66,25 @@ class PromptExpander:
             m = WILDCARD_TOKEN_RE.search(s)
             if not m:
                 break
-            token = m.group(1)
+            token = match.group(1)  
             is_mirrored = token.endswith("-mir")
             base_name = token[:-4] if is_mirrored else token
+
             try:
-                lines = self.wildcards.load_lines(base_name)
+                name_for_file = token if is_mirrored else base_name
+                lines = self.wildcards.load_lines(name_for_file)
             except FileNotFoundError:
-                replacement = ""
+                replacement = ""  # missing wildcard => remove token silently
+        else:
+            line_idx = stable_pick_index(self.seed, f"{token}::line", len(lines))
+            choice_line = lines[line_idx] if lines else ""
+
+            if is_mirrored:
+                replacement = self._expand_mirrored_line(choice_line, token, phase)
             else:
-                line = self.rng.choice(lines) if lines else ""
-                replacement = (
-                    self._expand_mirrored_line(line, base_name, phase)
-                    if is_mirrored else
-                    self._expand_choices_recursively(line)
-                )
-            s = s[:m.start()] + replacement + s[m.end():]
-        # Expand remaining braces
-        s = self._expand_choices_recursively(s)
+                replacement = self._expand_choices_recursively(choice_line)
+
+        s = s[:match.start()] + replacement + s[match.end():]
         return s
 
     def _expand_choices_recursively(self, s: str) -> str:
@@ -96,25 +98,31 @@ class PromptExpander:
             s = s[:m.start()] + chosen + s[m.end():]
         return s
 
-    def _expand_mirrored_line(self, line: str, base_name: str, phase: str) -> str:
-        pos = find_first_top_level_brace(line)
-        if not pos:
-            return self._expand_choices_recursively(line)
-        start, end = pos
-        inner = line[start+1:end]
-        options = split_choices(inner)
-        if not options:
-            return self._expand_choices_recursively(line)
-        # Deterministic anchor per (seed, file+line)
-        idx = stable_pick_index(self.seed, f"{base_name}:{line}", len(options))
-        if phase == "pos":
-            # Positive gets only the chosen option
-            core = options[idx]
-        else:
-            # Negative gets *all other* options (not the chosen one)
-            others = [opt for i, opt in enumerate(options) if i != idx]
-            # Join with commas so they appear as separate negatives
-            core = ", ".join(others) if others else ""
+def _expand_mirrored_line(self, line: str, token_key: str, phase: str) -> str:
+    """
+    Mirrored behavior:
+      - Locate the FIRST top-level {a|b|c|...} in the chosen line
+      - Deterministically pick one option via (seed, token_key, line)
+      - POS: replace with the chosen option
+      - NEG: replace with a comma-separated list of all remaining options
+      - Then expand any other braces normally
+    """
+    pos = find_first_top_level_brace(line)
+    if not pos:
+        return self._expand_choices_recursively(line)
 
-        rebuilt = line[:start] + core + line[end+1:]
-        return self._expand_choices_recursively(rebuilt)
+    start, end = pos
+    inner = line[start+1:end]
+    options = split_choices(inner)
+    if not options:
+        return self._expand_choices_recursively(line)
+
+    idx = stable_pick_index(self.seed, f"{token_key}:{line}", len(options))
+
+    if phase == "pos":
+        core = options[idx]
+    else:
+        core = ", ".join(opt for i, opt in enumerate(options) if i != idx)
+
+    rebuilt = line[:start] + core + line[end+1:]
+    return self._expand_choices_recursively(rebuilt)
