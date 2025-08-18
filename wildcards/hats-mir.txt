@@ -1,0 +1,2 @@
+{red hat|blue hat}
+{tall hat|short hat|medium hat}

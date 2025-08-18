@@ -1,0 +1,3 @@
+{red hat|blue hat|{green hat|yellow hat|{black hat|gold hat}}}
+beret
+top hat
