@@ -2,11 +2,11 @@ import os
 import re
 import random
 import hashlib
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Optional, Dict, Set
 
 # __token__ matches alnum, underscore, hyphen (so "hats-mir" is valid)
 WILDCARD_TOKEN_RE = re.compile(r"__([A-Za-z0-9_\-]+)__")
-# Innermost { ... } groups only (no nested braces inside this match)
+# Matches the innermost { ... } groups (i.e., no nested braces inside)
 INNER_BRACE_RE = re.compile(r"\{([^{}]+)\}")
 
 def split_choices(s: str) -> List[str]:
@@ -49,8 +49,9 @@ class WildcardStore:
 
     def load_lines(self, name: str) -> List[str]:
         """
-        Load <wildcard_dir>/<name>.txt (cached). 'name' is the exact token name,
-        e.g. 'hats' or 'hats-mir'. We do NOT fallback between -mir and non-mir.
+        Load <wildcard_dir>/<name>.txt (cached).
+        'name' is the exact token name, e.g. 'hats' or 'hats-mir'.
+        We do NOT fallback between -mir and non-mir.
         """
         if name in self._cache:
             return self._cache[name]
@@ -71,48 +72,78 @@ class PromptExpander:
     def __init__(self, wildcard_dir: str, seed: int = 0):
         self.wildcards = WildcardStore(wildcard_dir)
         self.seed = int(seed)
+        # RNG used for non-mirrored random choices (brace expansion, non-mir wildcards)
         self.rng = random.Random(self.seed)
-        # NEW: track any wildcard tokens we actually expand (including nested)
-        self.seen_tokens = set()
-        self.seen_mir_tokens = set()
+        # Track any -mir tokens actually encountered during *this* expansion
+        self.seen_tokens: Set[str] = set()
+        self.seen_mir_tokens: Set[str] = set()
 
     def expand_prompt(self, text: str, phase: str = "pos") -> str:
-        # reset tracking per expansion call
+        """
+        Expand a full prompt string.
+        phase: 'pos' or 'neg' (affects mirrored wildcard behavior only)
+        """
         self.seen_tokens.clear()
         self.seen_mir_tokens.clear()
         return self._expand_all(text or "", phase)
 
     def _expand_all(self, s: str, phase: str) -> str:
-        for _ in range(100):
+        """
+        1) Resolve wildcard tokens (possibly injecting more braces/tokens)
+        2) Expand remaining brace choices recursively
+        """
+        # Resolve wildcard tokens iteratively
+        for _ in range(200):
             m = WILDCARD_TOKEN_RE.search(s)
             if not m:
                 break
 
-            token = m.group(1)              # e.g. "outfits", "foo-mir"
+            token = m.group(1)  # e.g., "hats" or "foo-mir"
             is_mirrored = token.endswith("-mir")
             self.seen_tokens.add(token)
             if is_mirrored:
                 self.seen_mir_tokens.add(token)
 
-            name_for_file = token  # for -mir we read "<token>.txt" only
+            # STRICT: -mir reads "<token>.txt" exactly; non-mir reads "<token>.txt" too
+            name_for_file = token
+
+            replacement = ""
             try:
                 lines = self.wildcards.load_lines(name_for_file)
             except FileNotFoundError:
+                # Missing wildcard: remove token silently
                 replacement = ""
             else:
+                # Deterministic line pick so pos/neg (and repeated runs) hit the same line
                 line_idx = stable_pick_index(self.seed, f"{token}::line", len(lines))
                 choice_line = lines[line_idx] if lines else ""
-                replacement = (
-                    self._expand_mirrored_line(choice_line, token, phase)
-                    if is_mirrored else
-                    self._expand_choices_recursively(choice_line)
-                )
+
+                if is_mirrored:
+                    replacement = self._expand_mirrored_line(choice_line, token, phase)
+                else:
+                    # Regular wildcard: expand any braces nested in that line
+                    replacement = self._expand_choices_recursively(choice_line)
 
             s = s[:m.start()] + replacement + s[m.end():]
 
+        # After wildcards are (currently) resolved, expand any remaining brace groups
         s = self._expand_choices_recursively(s)
         return s
 
+    def _expand_choices_recursively(self, s: str) -> str:
+        """
+        Expand innermost {a|b|c} groups until none remain.
+        Uses RNG for each group (deterministic per seed).
+        """
+        for _ in range(800):
+            m = INNER_BRACE_RE.search(s)
+            if not m:
+                break
+            inner = m.group(1)
+            options = split_choices(inner)
+            chosen = self.rng.choice(options) if options else ""
+            s = s[:m.start()] + chosen + s[m.end():]
+        return s
 
     def _expand_mirrored_line(self, line: str, token_key: str, phase: str) -> str:
         """
