@@ -108,8 +108,13 @@ class PromptExpander:
         # Deterministic anchor per (seed, file+line)
         idx = stable_pick_index(self.seed, f"{base_name}:{line}", len(options))
         if phase == "pos":
+            # Positive gets only the chosen option
             core = options[idx]
         else:
-            core = ", ".join(opt for i, opt in enumerate(options) if i != idx)
+            # Negative gets *all other* options (not the chosen one)
+            others = [opt for i, opt in enumerate(options) if i != idx]
+            # Join with commas so they appear as separate negatives
+            core = ", ".join(others) if others else ""
+
         rebuilt = line[:start] + core + line[end+1:]
         return self._expand_choices_recursively(rebuilt)
