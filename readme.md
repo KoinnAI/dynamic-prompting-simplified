@@ -125,4 +125,5 @@ Negative: lowres, bad anatomy, __hats-mir__
 
 **License:** GNU General Public License (GPLv3) (https://www.gnu.org/licenses/gpl-3.0.en.html)
 
-Made for [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge)
+Made for [Stable Diffusion WebUI Forge](https://github.com/lllyasviel/stable-diffusion-webui-forge) <br>
+Check out the version for [ComfyUI](https://github.com/RegulusAlpha/ComfyUI-DynPromptSimplified)
