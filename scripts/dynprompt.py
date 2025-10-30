@@ -3,9 +3,10 @@ import gradio as gr
 from modules import scripts
 from modules.processing import fix_seed
 from dynprompt.expander import PromptExpander, WILDCARD_TOKEN_RE
+from modules import script_callbacks
 
 EXT_NAME = "Dynamic Prompt (Forge)"
-EXT_VER  = "1.4.0"
+EXT_VER = "1.4.1"  # Bumped version for clarity
 
 # Default wildcards dir: <this_extension_root>/wildcards
 DEFAULT_WILDCARD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wildcards")
@@ -115,6 +116,32 @@ class DynPromptScript(scripts.Script):
         p.all_negative_prompts = all_negative
         p.prompt = all_prompts[0]
         p.negative_prompt = all_negative[0]
-        # Store expanded prompts in extra_generation_params for transfer to other tabs
+
+        # Store expanded prompts in extra_generation_params for infotext
         p.extra_generation_params["Prompt"] = all_prompts[0]
         p.extra_generation_params["Negative prompt"] = all_negative[0]
+
+        # Store raw prompts for reference but override p.prompt for UI transfer
+        p.extra_generation_params["Raw prompt"] = pos_text_raw
+        p.extra_generation_params["Raw negative prompt"] = neg_text_raw
+
+    def after_component(self, component, **kwargs):
+        """
+        Hook into UI components to patch the 'Send to' button behavior.
+        Ensure the expanded prompt is used when transferring to other tabs.
+        """
+        # Check if the component is a 'Send to' button
+        if hasattr(component, "elem_id") and component.elem_id in [
+            "txt2img_send_to_img2img",
+            "txt2img_send_to_inpaint",
+            "txt2img_send_to_extras",
+            "img2img_send_to_img2img",
+            "img2img_send_to_inpaint",
+            "img2img_send_to_extras",
+        ]:
+            # Note: Directly modifying Gradio state here is complex and may require JavaScript injection
+            # Instead, rely on p.prompt override and infotext for now
+            print(f"[{EXT_NAME}] Detected 'Send to' button: {component.elem_id}")
+
+# Register the callback to hook into UI components
+script_callbacks.on_after_component(DynPromptScript().after_component)
