@@ -115,3 +115,6 @@ class DynPromptScript(scripts.Script):
         p.all_negative_prompts = all_negative
         p.prompt = all_prompts[0]
         p.negative_prompt = all_negative[0]
+        # Store expanded prompts in extra_generation_params for transfer to other tabs
+        p.extra_generation_params["Prompt"] = all_prompts[0]
+        p.extra_generation_params["Negative prompt"] = all_negative[0]
